@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { parseM3U, type M3UChannel } from '@/lib/utils/m3u-parser';
+import { parseM3U, groupChannelsByName, type M3UChannel } from '@/lib/utils/m3u-parser';
 
 export interface IPTVSource {
   id: string;
@@ -24,6 +24,7 @@ interface IPTVState {
 interface IPTVActions {
   addSource: (name: string, url: string) => void;
   removeSource: (id: string) => void;
+  updateSource: (id: string, updates: Partial<Pick<IPTVSource, 'name' | 'url'>>) => void;
   refreshSources: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 }
@@ -73,6 +74,14 @@ export const useIPTVStore = create<IPTVStore>()(
         }));
       },
 
+      updateSource: (id, updates) => {
+        set((state) => ({
+          sources: state.sources.map((s) =>
+            s.id === id ? { ...s, ...updates } : s
+          ),
+        }));
+      },
+
       refreshSources: async () => {
         const { sources } = get();
         if (sources.length === 0) {
@@ -101,8 +110,11 @@ export const useIPTVStore = create<IPTVStore>()(
 
           await fetchWithConcurrencyLimit(tasks, MAX_CONCURRENT);
 
+          // Group channels with the same name into multi-route entries
+          const grouped = groupChannelsByName(allChannels);
+
           set({
-            cachedChannels: allChannels,
+            cachedChannels: grouped,
             cachedGroups: Array.from(allGroups).sort(),
             lastRefreshed: Date.now(),
             isLoading: false,
@@ -118,9 +130,9 @@ export const useIPTVStore = create<IPTVStore>()(
       name: 'kvideo-iptv-store',
       partialize: (state) => ({
         sources: state.sources,
-        cachedChannels: state.cachedChannels,
-        cachedGroups: state.cachedGroups,
         lastRefreshed: state.lastRefreshed,
+        // Don't persist cachedChannels/cachedGroups - they can be very large
+        // and will be re-fetched on page load
       }),
     }
   )

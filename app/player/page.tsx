@@ -97,10 +97,20 @@ function PlayerContent() {
     return sources;
   }, [groupedSourcesParam, source, videoId, videoData?.vod_pic, discoveredSources]);
 
-  // Background fetch alternative sources when none provided
+  // Background fetch alternative sources when none provided or when existing ones lack full info
   const fetchedSourcesRef = useRef(false);
   useEffect(() => {
-    if (groupedSourcesParam || fetchedSourcesRef.current || !title) return;
+    if (fetchedSourcesRef.current || !title) return;
+
+    // Check if existing grouped sources already have full info (pic + latency)
+    let existingSources: SourceInfo[] = [];
+    if (groupedSourcesParam) {
+      try { existingSources = JSON.parse(groupedSourcesParam); } catch {}
+    }
+    const hasFullInfo = existingSources.length > 1 &&
+      existingSources.every(s => s.pic || s.latency !== undefined);
+    if (hasFullInfo) return;
+
     fetchedSourcesRef.current = true;
 
     const settings = settingsStore.getSettings();
@@ -169,6 +179,7 @@ function PlayerContent() {
 
   // Track current source for switching
   const [currentSourceId, setCurrentSourceId] = useState(source);
+  const playerTimeRef = useRef(0);
 
   // Add initial history entry when video data is loaded
   useEffect(() => {
@@ -267,6 +278,7 @@ function PlayerContent() {
                 isPremium={isPremium}
                 videoTitle={videoData?.vod_name || title || ''}
                 episodeName={videoData?.episodes?.[currentEpisode]?.name || ''}
+                externalTimeRef={playerTimeRef}
               />
               <div className="hidden lg:block">
                 <VideoMetadata
@@ -334,12 +346,21 @@ function PlayerContent() {
                       params.set('id', String(newSource.id));
                       params.set('source', newSource.source);
                       params.set('title', title || '');
+                      // Preserve current episode index
+                      params.set('episode', currentEpisode.toString());
+                      // Preserve playback position for seamless source switch
+                      if (playerTimeRef.current > 1) {
+                        params.set('t', Math.floor(playerTimeRef.current).toString());
+                      }
                       // Pass all known sources so switching persists
                       const allSources = groupedSources.length > 0 ? groupedSources : [];
                       if (allSources.length > 1) {
                         params.set('groupedSources', JSON.stringify(allSources));
                       } else if (groupedSourcesParam) {
                         params.set('groupedSources', groupedSourcesParam);
+                      }
+                      if (isPremium) {
+                        params.set('premium', '1');
                       }
                       setCurrentSourceId(newSource.source);
                       router.replace(`/player?${params.toString()}`, { scroll: false });
